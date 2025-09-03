@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
-#include <stfs/fs.h>
+#include <stfs/index.h>
 #include <stfs/device.h>
 
 class SearchEngine {

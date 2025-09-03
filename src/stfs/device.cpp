@@ -42,8 +42,7 @@ std::unique_ptr<Device> FileDevice::format(
     
     DeviceHead head {
         .disk_id = disk_id,
-        .total_blocks_on_disk = total_blocks_on_disk,
-        .tail_block_id = 0
+        .total_blocks_on_disk = total_blocks_on_disk
     };
     device->head_ = head;
     device->write_head();
@@ -53,11 +52,6 @@ std::unique_ptr<Device> FileDevice::format(
 
 const DeviceHead& FileDevice::get_head() const {
     return head_;
-}
-
-void FileDevice::update_tail_block_id(uint64_t tail_block_id) {
-    head_.tail_block_id = tail_block_id;
-    write_head();
 }
 
 std::unique_ptr<char[]> FileDevice::read(size_t position, size_t size)

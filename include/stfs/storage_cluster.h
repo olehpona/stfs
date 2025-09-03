@@ -81,6 +81,12 @@ struct BlockPlacement
     std::vector<uint64_t> ids;
 };
 
+struct PhysicalAddress {
+    uint8_t disk_id;
+    uint64_t offset;
+};
+
+
 struct ClusterConfig
 {
     uint64_t block_payload_size;
@@ -99,8 +105,7 @@ private:
     ClusterState state_;
 
     std::unique_ptr<char[]> read_and_verify_mirrored_data(
-        const std::vector<uint8_t> &device_ids,
-        uint64_t offset,
+        const std::vector<PhysicalAddress> &addresses,
         size_t size,
         const DataValidator &is_valid);
 

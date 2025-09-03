@@ -25,5 +25,5 @@ class Raid0 : public RaidGovernor
 {
 public:
     std::vector<PhysicalLocation> map_logical_to_physical(uint64_t block_id, const std::vector<DiskLayout> &disks_layout) const override;
-    uint8_t get_type() const;
+    uint8_t get_type() const override;
 };

@@ -1,7 +1,28 @@
 #include <stfs/index.h>
 #include <algorithm>
 
-RawIndexEntry Index::convert_to_raw(const IndexEntry& memory_entry) const {
+void RawIndexEntry::update_crc()
+{
+    this->crc32 = 0;
+    this->crc32 = generate_CRC32(
+        reinterpret_cast<const uint8_t *>(this),
+        sizeof(*this));
+}
+
+bool RawIndexEntry::is_valid() const
+{
+    RawIndexEntry self_copy = *this;
+    self_copy.crc32 = 0;
+
+    uint32_t calculated_crc = generate_CRC32(
+        reinterpret_cast<const uint8_t *>(&self_copy),
+        sizeof(self_copy));
+
+    return calculated_crc == this->crc32;
+}
+
+RawIndexEntry Index::convert_to_raw(const IndexEntry &memory_entry) const
+{
     RawIndexEntry raw_entry;
 
     raw_entry.timestamp = memory_entry.timestamp;
@@ -18,58 +39,74 @@ RawIndexEntry Index::convert_to_raw(const IndexEntry& memory_entry) const {
     return raw_entry;
 }
 
-void Index::write_entry(uint64_t id, const IndexEntry& entry)
+void Index::write_entry(uint64_t id, const IndexEntry &entry)
 {
-    const RawIndexEntry& raw_entry = convert_to_raw(entry);
+    const RawIndexEntry &raw_entry = convert_to_raw(entry);
 
-    storage_cluster_.write_index_block(id, reinterpret_cast<const char*>(&raw_entry));
+    storage_cluster_.write_index_block(id, reinterpret_cast<const char *>(&raw_entry));
 }
 
-IndexEntry Index::convert_from_raw(const RawIndexEntry& raw_entry) const {
+IndexEntry Index::convert_from_raw(const RawIndexEntry &raw_entry) const
+{
     IndexEntry memory_entry;
     memory_entry.timestamp = raw_entry.timestamp;
     memory_entry.device_count = raw_entry.device_count;
 
     size_t count = raw_entry.device_count;
-    if (count > MAX_DEVICES) {
+    if (count > MAX_DEVICES)
+    {
         count = MAX_DEVICES;
     }
 
     memory_entry.local_ids.assign(
         raw_entry.local_ids,
-        raw_entry.local_ids + count
-    );
+        raw_entry.local_ids + count);
 
     memory_entry.devices_id.assign(
         raw_entry.devices_id,
-        raw_entry.devices_id + count
-    );
+        raw_entry.devices_id + count);
 
     return memory_entry;
 }
 
 IndexEntry Index::read_entry(uint64_t id) const
 {
+    DataValidator validator = [](const char *data, size_t size) -> bool
+    {
+        if (size != sizeof(RawIndexEntry))
+        {
+            return false;
+        }
+
+        RawIndexEntry candidate;
+        std::memcpy(&candidate, data, size);
+
+        return candidate.is_valid();
+    };
+
     RawIndexEntry raw_entry;
-    std::unique_ptr<char[]> buffer(storage_cluster_.read_index_block(id));
+
+    std::unique_ptr<char[]> buffer(storage_cluster_.read_index_block(id, validator));
     std::memcpy(&raw_entry, buffer.get(), sizeof(RawIndexEntry));
 
     return convert_from_raw(raw_entry);
 }
 
-Index::Index(StorageCluster& storage_cluster, uint64_t index_size) : storage_cluster_(storage_cluster), index_size_(index_size){}
+Index::Index(StorageCluster &storage_cluster, uint64_t index_size) : storage_cluster_(storage_cluster), index_size_(index_size) {}
 
-
-IndexEntry Index::get_entry(uint64_t id) const {
-    if (id >= index_size_) {
+IndexEntry Index::get_entry(uint64_t id) const
+{
+    if (id >= index_size_)
+    {
         throw IndexError("Id " + std::to_string(id) + " out of bound.");
     }
     return read_entry(id);
 }
 
-void Index::modify_entry(uint64_t id, const IndexEntry& new_entry)
+void Index::modify_entry(uint64_t id, const IndexEntry &new_entry)
 {
-    if (id >= index_size_) {
+    if (id >= index_size_)
+    {
         throw IndexError("Id " + std::to_string(id) + " out of bound.");
     }
 
