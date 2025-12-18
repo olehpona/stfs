@@ -5,9 +5,13 @@
 #include <string>
 #include <stdexcept>
 
+#define DEVICE_HEAD_SIZE 9
 struct DeviceHead {
     uint64_t total_blocks_on_disk = 0;
     uint8_t  disk_id = 0;
+
+    std::vector<char> serialize() const;
+    size_t deserialize(const char* buffer);
 };
 
 class DeviceError : public std::runtime_error

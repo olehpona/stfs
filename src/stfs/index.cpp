@@ -1,95 +1,74 @@
 #include <stfs/index.h>
+#include <stfs/serelization.h>
 #include <algorithm>
 
-void RawIndexEntry::update_crc()
+std::vector<char> IndexEntry::serialize() const {
+    std::vector<char> buffer;
+    buffer.resize(INDEX_ENTRY_SIZE);
+
+    char *ptr = buffer.data();
+
+    SERIALIZE_FIELD(ptr, timestamp, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, crc32, uint32_t, serializeU32);
+    return buffer;
+}
+
+size_t IndexEntry::deserialize(const char* buffer) {
+    const char* start = buffer;
+
+    DESERIALIZE_FIELD(buffer, timestamp, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, crc32, uint32_t, deserializeU32);
+
+    return buffer-start;
+}
+
+void IndexEntry::update_crc()
 {
     this->crc32 = 0;
+    auto serialized_data = serialize(); 
     this->crc32 = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(this),
-        sizeof(*this));
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
 }
 
-bool RawIndexEntry::is_valid() const
+bool IndexEntry::is_valid() const
 {
-    RawIndexEntry self_copy = *this;
+    IndexEntry self_copy = *this;
     self_copy.crc32 = 0;
-
+    auto serialized_data = self_copy.serialize(); 
     uint32_t calculated_crc = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(&self_copy),
-        sizeof(self_copy));
-
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
     return calculated_crc == this->crc32;
-}
-
-RawIndexEntry Index::convert_to_raw(const IndexEntry &memory_entry) const
-{
-    RawIndexEntry raw_entry;
-
-    raw_entry.timestamp = memory_entry.timestamp;
-    raw_entry.device_count = memory_entry.device_count;
-
-    size_t addresses_to_copy = std::min((size_t)MAX_DEVICES, memory_entry.local_ids.size());
-    size_t addresses_bytes = addresses_to_copy * sizeof(uint64_t);
-    std::memcpy(raw_entry.local_ids, memory_entry.local_ids.data(), addresses_bytes);
-
-    size_t devices_id_to_copy = std::min((size_t)MAX_DEVICES, memory_entry.devices_id.size());
-    size_t devices_id_bytes = devices_id_to_copy * sizeof(uint8_t);
-    std::memcpy(raw_entry.devices_id, memory_entry.devices_id.data(), devices_id_bytes);
-
-    return raw_entry;
 }
 
 void Index::write_entry(uint64_t id, const IndexEntry &entry)
 {
-    const RawIndexEntry &raw_entry = convert_to_raw(entry);
-
-    storage_cluster_.write_index_block(id, reinterpret_cast<const char *>(&raw_entry));
-}
-
-IndexEntry Index::convert_from_raw(const RawIndexEntry &raw_entry) const
-{
-    IndexEntry memory_entry;
-    memory_entry.timestamp = raw_entry.timestamp;
-    memory_entry.device_count = raw_entry.device_count;
-
-    size_t count = raw_entry.device_count;
-    if (count > MAX_DEVICES)
-    {
-        count = MAX_DEVICES;
-    }
-
-    memory_entry.local_ids.assign(
-        raw_entry.local_ids,
-        raw_entry.local_ids + count);
-
-    memory_entry.devices_id.assign(
-        raw_entry.devices_id,
-        raw_entry.devices_id + count);
-
-    return memory_entry;
+    auto serialized_data = entry.serialize();
+    storage_cluster_.write_index_block(id, reinterpret_cast<const char *>(serialized_data.data()));
 }
 
 IndexEntry Index::read_entry(uint64_t id) const
 {
     DataValidator validator = [](const char *data, size_t size) -> bool
     {
-        if (size != sizeof(RawIndexEntry))
+        if (size != INDEX_ENTRY_SIZE)
         {
             return false;
         }
 
-        RawIndexEntry candidate;
-        std::memcpy(&candidate, data, size);
+        IndexEntry candidate;
+        candidate.deserialize(data);
 
         return candidate.is_valid();
     };
 
-    RawIndexEntry raw_entry;
+    IndexEntry entry;
 
     std::unique_ptr<char[]> buffer(storage_cluster_.read_index_block(id, validator));
-    std::memcpy(&raw_entry, buffer.get(), sizeof(RawIndexEntry));
+    entry.deserialize(buffer.get());
 
-    return convert_from_raw(raw_entry);
+    return entry;
 }
 
 Index::Index(StorageCluster &storage_cluster, uint64_t index_size) : storage_cluster_(storage_cluster), index_size_(index_size) {}
@@ -103,12 +82,23 @@ IndexEntry Index::get_entry(uint64_t id) const
     return read_entry(id);
 }
 
+uint64_t Index::find_entry_id_by_timestamp(uint64_t timestamp) const {
+    auto buffer_state = storage_cluster_.get_ring_buffer_state();
+
+    TimeStampFetcher fetcher = [this](uint64_t id) -> uint64_t {
+        return get_entry(id).timestamp;
+    };
+
+    return SearchEngine::find_block_id_by_timestamp(timestamp,fetcher, buffer_state);
+}
+
 void Index::modify_entry(uint64_t id, const IndexEntry &new_entry)
 {
     if (id >= index_size_)
     {
         throw IndexError("Id " + std::to_string(id) + " out of bound.");
     }
-
-    write_entry(id, new_entry);
+    IndexEntry mutable_entry = new_entry;
+    mutable_entry.update_crc();
+    write_entry(id, mutable_entry);
 }

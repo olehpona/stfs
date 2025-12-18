@@ -1,37 +1,23 @@
 #pragma once
 #include <iostream>
 #include <cstdint>
-#include <stfs/device.h>
 #include <stfs/index.h>
-#include <stfs/raid.h>
+#include <stfs/block.h>
+#include <stfs/storage_cluster.h>
+#include <stfs/journal.h>
 #include <vector>
 
-struct Block {
-    uint64_t timestamp;
-    uint64_t payload_size;
-    uint8_t* payload = nullptr;
-    uint32_t crc32;
-
-    Block(uint64_t timestamp, uint64_t payload_size, uint8_t* payload);
-    bool verifyPayload();
-};
-
-class FS{
+class Fs{
     private:
-        std::vector<std::reference_wrapper<Device>> devices;
-        RaidGovernor raid;
-        Index& index;
+        StorageCluster& cluster_;
+        Index& index_;
+        Journal& journal_;
 
-        void writeBlock(Block block);
-        Block readBlock();
+        Block read_block(uint64_t id);
     public:
-        FS(std::vector<std::reference_wrapper<Device>> devices_vec, Index& index_ptr, RaidGovernor raid_governor);
-        void  create_block(uint64_t timestamp, uint8_t *payload);
+        Fs(StorageCluster& cluster_ref, Index& index_ref, Journal& journal_ref);
+        void  create_block(uint64_t timestamp, const char *payload);
         void  add_block(Block block);
         Block get_block_by_id(uint64_t id);
         Block get_block_by_timestamp(uint64_t timestamp);
-        void  edit_block_by_id(uint64_t id, Block block);
-        void  edit_block_by_timestamp(uint64_t id, Block block);
-        void  erase_block_payload_by_id(uint64_t id);
-        void  erase_block_payload_by_timestamp(uint64_t id);
 };

@@ -1,36 +1,132 @@
 #include <optional>
 #include <algorithm>
 #include <iterator>
+#include <stfs/serelization.h>
 #include <stfs/const.h>
 #include <stfs/crypto.h>
 #include <stfs/storage_cluster.h>
 
+std::vector<char> ClusterHead::serialize() const
+{
+    std::vector<char> buffer;
+    buffer.resize(CLUSTER_HEAD_SIZE);
+
+    char *ptr = buffer.data();
+
+    std::memcpy(ptr, magic.data(), magic.size());
+    ptr += magic.size();
+
+    SERIALIZE_FIELD(ptr, version, uint32_t, serializeU32);
+    std::memcpy(ptr, &num_of_disks, sizeof(num_of_disks));
+    ptr += sizeof(num_of_disks);
+    std::memcpy(ptr, &raid_type, sizeof(raid_type));
+    ptr += sizeof(raid_type);
+    std::memcpy(ptr, mime, sizeof(mime));
+    ptr += sizeof(mime);
+    SERIALIZE_FIELD(ptr, block_payload_size, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, total_blocks, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, device_head_offset, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, cluster_state_offset, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, index_offset, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, data_offset, uint64_t, serializeU64);
+
+    SERIALIZE_FIELD(ptr, reserve1, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, reserve2, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, reserve3, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, reserve4, uint64_t, serializeU64);
+
+    SERIALIZE_FIELD(ptr, crc32, uint32_t, serializeU32);
+    return buffer;
+}
+
+size_t ClusterHead::deserialize(const char *buffer)
+{
+    const char *start = buffer;
+
+    std::memcpy(magic.data(), buffer, magic.size());
+    buffer += magic.size();
+
+    DESERIALIZE_FIELD(buffer, version, uint32_t, deserializeU32);
+    num_of_disks = *buffer;
+    buffer += sizeof(num_of_disks);
+    raid_type = *buffer;
+    buffer += sizeof(raid_type);
+    std::memcpy(mime, buffer, sizeof(mime));
+    buffer += sizeof(mime);
+    DESERIALIZE_FIELD(buffer, block_payload_size, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, total_blocks, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, device_head_offset, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, cluster_state_offset, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, index_offset, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, data_offset, uint64_t, deserializeU64);
+
+    DESERIALIZE_FIELD(buffer, reserve1, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, reserve2, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, reserve3, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, reserve4, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, crc32, uint32_t, deserializeU32);
+
+    return buffer - start;
+}
+
 void ClusterHead::update_crc()
 {
     this->crc32 = 0;
+    auto serialized_data = serialize();
     this->crc32 = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(this),
-        sizeof(*this));
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
 }
 
 bool ClusterHead::is_valid() const
 {
     ClusterHead self_copy = *this;
     self_copy.crc32 = 0;
+    auto serialized_data = self_copy.serialize();
 
     uint32_t calculated_crc = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(&self_copy),
-        sizeof(self_copy));
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
 
     return calculated_crc == this->crc32;
+}
+
+std::vector<char> ClusterState::serialize() const
+{
+    std::vector<char> buffer;
+    buffer.resize(CLUSTER_STATE_SIZE);
+
+    char *ptr = buffer.data();
+
+    SERIALIZE_FIELD(ptr, head_logical_block_id, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, tail_logical_block_id, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, valid_block_count, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, total_writes_count, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, crc32, uint32_t, serializeU32);
+
+    return buffer;
+}
+
+size_t ClusterState::deserialize(const char *buffer)
+{
+    const char *start = buffer;
+
+    DESERIALIZE_FIELD(buffer, head_logical_block_id, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, tail_logical_block_id, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, valid_block_count, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, total_writes_count, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, crc32, uint32_t, deserializeU32);
+
+    return buffer - start;
 }
 
 void ClusterState::update_crc()
 {
     this->crc32 = 0;
+    auto serialized_data = serialize();
     this->crc32 = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(this),
-        sizeof(*this));
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
 }
 
 bool ClusterState::is_valid() const
@@ -38,9 +134,11 @@ bool ClusterState::is_valid() const
     ClusterState self_copy = *this;
     self_copy.crc32 = 0;
 
+    auto serialized_data = self_copy.serialize();
+
     uint32_t calculated_crc = generate_CRC32(
-        reinterpret_cast<const uint8_t *>(&self_copy),
-        sizeof(self_copy));
+        reinterpret_cast<const uint8_t *>(serialized_data.data()),
+        serialized_data.size());
 
     return calculated_crc == this->crc32;
 }
@@ -82,7 +180,7 @@ std::unique_ptr<char[]> StorageCluster::read_and_verify_mirrored_data(
     int max_votes = winner_it->second;
     const std::vector<char> &winner_key = winner_it->first;
 
-    size_t required_quorum = (devices_.size() / 2) + 1;
+    size_t required_quorum = (addresses.size() / 2) + 1;
     if (max_votes < required_quorum)
     {
         throw ClusterError("Cluster is inconsistent: No quorum for data. Manual intervention required.");
@@ -125,13 +223,13 @@ void StorageCluster::read_and_verify_heads()
 {
     DataValidator validator = [](const char *data, size_t size) -> bool
     {
-        if (size != sizeof(ClusterHead))
+        if (size != CLUSTER_HEAD_SIZE)
         {
             return false;
         }
 
         ClusterHead candidate;
-        std::memcpy(&candidate, data, size);
+        candidate.deserialize(data);
 
         return candidate.is_valid();
     };
@@ -150,22 +248,22 @@ void StorageCluster::read_and_verify_heads()
                 .offset = 0};
         });
 
-    auto stored_head = read_and_verify_mirrored_data(addresses, sizeof(ClusterHead), validator);
+    auto stored_head = read_and_verify_mirrored_data(addresses, CLUSTER_HEAD_SIZE, validator);
 
-    std::memcpy(&head_, stored_head.get(), sizeof(ClusterHead));
+    head_.deserialize(stored_head.get());
 }
 
 void StorageCluster::read_and_verify_states()
 {
     DataValidator validator = [](const char *data, size_t size) -> bool
     {
-        if (size != sizeof(ClusterState))
+        if (size != CLUSTER_STATE_SIZE)
         {
             return false;
         }
 
         ClusterState candidate;
-        std::memcpy(&candidate, data, size);
+        candidate.deserialize(data);
 
         return candidate.is_valid();
     };
@@ -177,28 +275,34 @@ void StorageCluster::read_and_verify_states()
         devices_.begin(),
         devices_.end(),
         std::back_inserter(addresses),
-        [](const auto &pair)
+        [this](const auto &pair)
         {
             return PhysicalAddress{
                 .disk_id = pair.first,
-                .offset = sizeof(ClusterHead)};
+                .offset = head_.cluster_state_offset};
         });
 
-    auto stored_head = read_and_verify_mirrored_data(addresses, sizeof(ClusterState), validator);
+    auto stored_state = read_and_verify_mirrored_data(addresses, CLUSTER_STATE_SIZE, validator);
 
-    std::memcpy(&state_, stored_head.get(), sizeof(ClusterState));
+    state_.deserialize(stored_state.get());
 }
 
 void StorageCluster::write_head_to_all_devices()
 {
     head_.update_crc();
-    mirrored_write(0, reinterpret_cast<const char *>(&head_), sizeof(ClusterHead));
+
+    auto serialized = head_.serialize();
+
+    mirrored_write(0, reinterpret_cast<const char *>(serialized.data()), CLUSTER_HEAD_SIZE);
 }
 
 void StorageCluster::write_state_to_all_devices()
 {
     state_.update_crc();
-    mirrored_write(sizeof(ClusterHead), reinterpret_cast<const char *>(&state_), sizeof(ClusterState));
+
+    auto serialized = state_.serialize();
+
+    mirrored_write(head_.cluster_state_offset, reinterpret_cast<const char *>(serialized.data()), CLUSTER_STATE_SIZE);
 }
 
 void StorageCluster::mirrored_write(size_t address, const char *data, size_t size)
@@ -233,21 +337,23 @@ std::unique_ptr<char[]> StorageCluster::read(uint8_t device_id, size_t address, 
     return device->read(address, size);
 }
 
-StorageCluster::StorageCluster(std::unique_ptr<RaidGovernor> governor) : raid_governor_(std::move(governor)) {}
+StorageCluster::StorageCluster(std::unique_ptr<RaidGovernor> governor, const ClusterStructsSizes &sizes) : raid_governor_(std::move(governor))
+{
+    index_entry_size_ = sizes.index_entry_size;
+    total_block_size_ = sizes.total_block_size;
+    transaction_size_ = sizes.transaction_size;
+}
 
-void StorageCluster::format_cluster(const std::vector<DeviceFormatBlueprint> &blueprints, const ClusterConfig &config)
+void StorageCluster::format_cluster(const std::vector<DeviceFormatBlueprint> &blueprints, uint64_t block_payload_size)
 {
     if (blueprints.size() > MAX_DEVICES)
     {
-        throw ClusterError("Device limit reached, max " + MAX_DEVICES);
+        throw ClusterError("Device limit reached, max " + std::to_string(MAX_DEVICES));
     }
-
-    index_entry_size_ = config.index_entry_size;
-    total_block_size_ = config.total_block_size;
 
     head_.raid_type = raid_governor_->get_type();
     head_.num_of_disks = blueprints.size();
-    head_.block_payload_size = config.block_payload_size;
+    head_.block_payload_size = block_payload_size;
 
     head_.total_blocks = 0;
 
@@ -255,34 +361,36 @@ void StorageCluster::format_cluster(const std::vector<DeviceFormatBlueprint> &bl
     {
         const DeviceFormatBlueprint &blueprint = blueprints[i];
 
-        auto device = blueprint.formater(blueprint.path, sizeof(ClusterHead), i);
+        auto device = blueprint.formater(blueprint.path, CLUSTER_HEAD_SIZE, i);
 
         head_.total_blocks += device->get_head().total_blocks_on_disk;
 
         devices_.emplace(i, std::move(device));
     }
+    head_.data_offset = head_.index_offset + (head_.total_blocks * index_entry_size_) + transaction_size_;
 
     head_.update_crc();
 
     write_head_to_all_devices();
+    write_state_to_all_devices();
 }
 
 void StorageCluster::open_cluster(const std::vector<DeviceOpenBlueprint> &blueprints)
 {
     if (blueprints.size() > MAX_DEVICES)
     {
-        throw ClusterError("Device limit reached, max " + MAX_DEVICES);
+        throw ClusterError("Device limit reached, max " + std::to_string(MAX_DEVICES));
     }
 
     for (auto blueprint : blueprints)
     {
-        auto device = blueprint.opener(blueprint.path, sizeof(ClusterHead));
+        auto device = blueprint.opener(blueprint.path, CLUSTER_HEAD_SIZE);
 
         uint8_t disk_id = device->get_head().disk_id;
 
         if (devices_.contains(disk_id))
         {
-            throw ClusterError("Disk already exists, id: " + disk_id);
+            throw ClusterError("Disk already exists, id: " + std::to_string(disk_id));
         }
 
         devices_.emplace(disk_id, std::move(device));
@@ -292,7 +400,7 @@ void StorageCluster::open_cluster(const std::vector<DeviceOpenBlueprint> &bluepr
     read_and_verify_states();
 }
 
-BlockPlacement StorageCluster::write_next_block(const char *data)
+void StorageCluster::write_next_block(const char *data)
 {
     std::vector<DiskLayout> layouts;
     layouts.reserve(devices_.size());
@@ -308,23 +416,7 @@ BlockPlacement StorageCluster::write_next_block(const char *data)
                 .total_blocks = pair.second->get_head().total_blocks_on_disk};
         });
 
-    for (auto &[key, device] : devices_)
-    {
-        layouts.push_back(DiskLayout{
-            .disk_id = key,
-            .total_blocks = device->get_head().total_blocks_on_disk});
-    }
-
-    uint64_t new_block_id = state_.tail_logical_block_id;
-
-    if (new_block_id == head_.total_blocks)
-    {
-        new_block_id = 0;
-    }
-    else
-    {
-        new_block_id++;
-    }
+    uint64_t new_block_id = get_ring_buffer_state().get_next_block_id();
 
     std::vector<PhysicalLocation> location_to_write = raid_governor_->map_logical_to_physical(new_block_id, layouts);
 
@@ -332,14 +424,23 @@ BlockPlacement StorageCluster::write_next_block(const char *data)
     {
         auto &device = devices_.at(location.disk_id);
 
-        size_t offset = head_.index_offset + (index_entry_size_ * head_.total_blocks) + location.block_id_on_disk * total_block_size_;
+        size_t offset = head_.data_offset + location.block_id_on_disk * total_block_size_;
 
         device->write(offset, data, total_block_size_);
     }
 
-    state_.tail_logical_block_id = new_block_id;
     state_.total_writes_count++;
-    if (state_.valid_block_count < head_.total_blocks)
+
+    bool was_full = (state_.valid_block_count == head_.total_blocks);
+
+    if (was_full)
+    {
+        state_.head_logical_block_id = (state_.head_logical_block_id + 1) % head_.total_blocks;
+    }
+
+    state_.tail_logical_block_id = new_block_id;
+
+    if (!was_full)
     {
         state_.valid_block_count++;
     }
@@ -353,13 +454,27 @@ void StorageCluster::write_index_block(uint64_t id, const char *data)
     mirrored_write(offset, data, index_entry_size_);
 }
 
-uint64_t StorageCluster::get_total_blocks_count() const
+void StorageCluster::write_transaction_block(const char *data)
 {
-    return head_.total_blocks;
+    size_t offset = head_.index_offset + index_entry_size_ * head_.total_blocks;
+    mirrored_write(offset, data, transaction_size_);
+}
+
+RingBufferState StorageCluster::get_ring_buffer_state() const
+{
+    return {
+        .head_id = state_.head_logical_block_id,
+        .tail_id = state_.tail_logical_block_id,
+        .count = state_.valid_block_count,
+        .capacity = head_.total_blocks};
 }
 
 std::unique_ptr<char[]> StorageCluster::read_block(uint64_t id, DataValidator validator)
 {
+    if (id >= head_.total_blocks)
+    {
+        throw ClusterError("Block id is out of bound");
+    }
     std::vector<DiskLayout> layouts;
     layouts.reserve(devices_.size());
 
@@ -387,7 +502,7 @@ std::unique_ptr<char[]> StorageCluster::read_block(uint64_t id, DataValidator va
         {
             return PhysicalAddress{
                 .disk_id = location.disk_id,
-                .offset = head_.index_offset + (head_.total_blocks * index_entry_size_) + (location.block_id_on_disk * total_block_size_)};
+                .offset = head_.data_offset + (location.block_id_on_disk * total_block_size_)};
         });
 
     return read_and_verify_mirrored_data(physical_locations, total_block_size_, validator);
@@ -395,10 +510,11 @@ std::unique_ptr<char[]> StorageCluster::read_block(uint64_t id, DataValidator va
 
 std::unique_ptr<char[]> StorageCluster::read_index_block(uint64_t id, DataValidator validator)
 {
+    if (id >= head_.total_blocks)
+    {
+        throw ClusterError("Block id is out of bound");
+    }
     size_t entry_offset = head_.index_offset + index_entry_size_ * id;
-
-    std::vector<uint8_t> devices_ids;
-    devices_ids.reserve(devices_.size());
 
     std::vector<PhysicalAddress> addresses;
     addresses.reserve(devices_.size());
@@ -415,4 +531,38 @@ std::unique_ptr<char[]> StorageCluster::read_index_block(uint64_t id, DataValida
         });
 
     return read_and_verify_mirrored_data(addresses, index_entry_size_, validator);
+}
+
+std::unique_ptr<char[]> StorageCluster::read_transaction_block(DataValidator validator)
+{
+    size_t offset = head_.index_offset + index_entry_size_ * head_.total_blocks;
+    std::vector<PhysicalAddress> addresses;
+    addresses.reserve(devices_.size());
+
+    std::transform(
+        devices_.begin(),
+        devices_.end(),
+        std::back_inserter(addresses),
+        [offset](const auto &pair)
+        {
+            return PhysicalAddress{
+                .disk_id = pair.first,
+                .offset = offset};
+        });
+    return read_and_verify_mirrored_data(addresses, transaction_size_, validator);
+}
+
+const ClusterState &StorageCluster::get_state() const
+{
+    return state_;
+}
+
+const ClusterHead &StorageCluster::get_head() const
+{
+    return head_;
+}
+
+void StorageCluster::update_state(ClusterState state)
+{
+    state_ = state;
 }
