@@ -1,6 +1,5 @@
 #pragma once
 #include <stfs/storage_cluster.h>
-#include <stfs/index.h>
 #include <stfs/block.h>
 #include <optional>
 #include <vector>
@@ -19,10 +18,9 @@ struct Transaction {
 class Journal {
     private:
         StorageCluster& cluster_;
-        Index& index_;
         std::optional<Transaction> entry_;
     public:
-        Journal(StorageCluster& cluster, Index& index);
+        Journal(StorageCluster& cluster);
 
         void create_transaction(Block block);
         void commit_transaction();

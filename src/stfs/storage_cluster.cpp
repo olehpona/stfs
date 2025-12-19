@@ -27,7 +27,7 @@ std::vector<char> ClusterHead::serialize() const
     SERIALIZE_FIELD(ptr, total_blocks, uint64_t, serializeU64);
     SERIALIZE_FIELD(ptr, device_head_offset, uint64_t, serializeU64);
     SERIALIZE_FIELD(ptr, cluster_state_offset, uint64_t, serializeU64);
-    SERIALIZE_FIELD(ptr, index_offset, uint64_t, serializeU64);
+    SERIALIZE_FIELD(ptr, journal_offset, uint64_t, serializeU64);
     SERIALIZE_FIELD(ptr, data_offset, uint64_t, serializeU64);
 
     SERIALIZE_FIELD(ptr, reserve1, uint64_t, serializeU64);
@@ -57,7 +57,7 @@ size_t ClusterHead::deserialize(const char *buffer)
     DESERIALIZE_FIELD(buffer, total_blocks, uint64_t, deserializeU64);
     DESERIALIZE_FIELD(buffer, device_head_offset, uint64_t, deserializeU64);
     DESERIALIZE_FIELD(buffer, cluster_state_offset, uint64_t, deserializeU64);
-    DESERIALIZE_FIELD(buffer, index_offset, uint64_t, deserializeU64);
+    DESERIALIZE_FIELD(buffer, journal_offset, uint64_t, deserializeU64);
     DESERIALIZE_FIELD(buffer, data_offset, uint64_t, deserializeU64);
 
     DESERIALIZE_FIELD(buffer, reserve1, uint64_t, deserializeU64);
@@ -180,7 +180,7 @@ std::unique_ptr<char[]> StorageCluster::read_and_verify_mirrored_data(
     int max_votes = winner_it->second;
     const std::vector<char> &winner_key = winner_it->first;
 
-    size_t required_quorum = (addresses.size() / 2) + 1;
+    size_t required_quorum = (vote_counts.size() / 2) + 1;
     if (max_votes < required_quorum)
     {
         throw ClusterError("Cluster is inconsistent: No quorum for data. Manual intervention required.");
@@ -339,7 +339,6 @@ std::unique_ptr<char[]> StorageCluster::read(uint8_t device_id, size_t address, 
 
 StorageCluster::StorageCluster(std::unique_ptr<RaidGovernor> governor, const ClusterStructsSizes &sizes) : raid_governor_(std::move(governor))
 {
-    index_entry_size_ = sizes.index_entry_size;
     total_block_size_ = sizes.total_block_size;
     transaction_size_ = sizes.transaction_size;
 }
@@ -367,7 +366,7 @@ void StorageCluster::format_cluster(const std::vector<DeviceFormatBlueprint> &bl
 
         devices_.emplace(i, std::move(device));
     }
-    head_.data_offset = head_.index_offset + (head_.total_blocks * index_entry_size_) + transaction_size_;
+    head_.data_offset = head_.journal_offset + CLUSTER_STATE_SIZE + total_block_size_;
 
     head_.update_crc();
 
@@ -448,16 +447,9 @@ void StorageCluster::write_next_block(const char *data)
     write_state_to_all_devices();
 }
 
-void StorageCluster::write_index_block(uint64_t id, const char *data)
-{
-    size_t offset = head_.index_offset + index_entry_size_ * id;
-    mirrored_write(offset, data, index_entry_size_);
-}
-
 void StorageCluster::write_transaction_block(const char *data)
 {
-    size_t offset = head_.index_offset + index_entry_size_ * head_.total_blocks;
-    mirrored_write(offset, data, transaction_size_);
+    mirrored_write(head_.journal_offset, data, transaction_size_);
 }
 
 RingBufferState StorageCluster::get_ring_buffer_state() const
@@ -508,34 +500,9 @@ std::unique_ptr<char[]> StorageCluster::read_block(uint64_t id, DataValidator va
     return read_and_verify_mirrored_data(physical_locations, total_block_size_, validator);
 }
 
-std::unique_ptr<char[]> StorageCluster::read_index_block(uint64_t id, DataValidator validator)
-{
-    if (id >= head_.total_blocks)
-    {
-        throw ClusterError("Block id is out of bound");
-    }
-    size_t entry_offset = head_.index_offset + index_entry_size_ * id;
-
-    std::vector<PhysicalAddress> addresses;
-    addresses.reserve(devices_.size());
-
-    std::transform(
-        devices_.begin(),
-        devices_.end(),
-        std::back_inserter(addresses),
-        [entry_offset](const auto &pair)
-        {
-            return PhysicalAddress{
-                .disk_id = pair.first,
-                .offset = entry_offset};
-        });
-
-    return read_and_verify_mirrored_data(addresses, index_entry_size_, validator);
-}
-
 std::unique_ptr<char[]> StorageCluster::read_transaction_block(DataValidator validator)
 {
-    size_t offset = head_.index_offset + index_entry_size_ * head_.total_blocks;
+    size_t offset = head_.journal_offset;
     std::vector<PhysicalAddress> addresses;
     addresses.reserve(devices_.size());
 

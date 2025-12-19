@@ -34,7 +34,7 @@ struct ClusterHead // imutable fs meta block
     uint64_t total_blocks = 0;                                        // total blocks on claster
     uint64_t device_head_offset = CLUSTER_HEAD_SIZE;                // where device head is on device
     uint64_t cluster_state_offset = CLUSTER_HEAD_SIZE + DEVICE_HEAD_SIZE; // where cluster state is on device
-    uint64_t index_offset = CLUSTER_HEAD_SIZE + DEVICE_HEAD_SIZE + CLUSTER_STATE_SIZE; // where index is on device
+    uint64_t journal_offset = CLUSTER_HEAD_SIZE + DEVICE_HEAD_SIZE + CLUSTER_STATE_SIZE; // where index is on device
     uint64_t data_offset = 0;                                         // where data begins
 
     // reserved 32 bytes for future
@@ -98,7 +98,6 @@ struct PhysicalAddress
 struct ClusterStructsSizes
 {
     uint64_t total_block_size;
-    uint64_t index_entry_size;
     uint64_t transaction_size;
 };
 
@@ -107,7 +106,6 @@ class StorageCluster
 private:
     std::map<uint8_t, std::unique_ptr<Device>> devices_;
     std::unique_ptr<RaidGovernor> raid_governor_;
-    uint64_t index_entry_size_ = 0;
     uint64_t total_block_size_ = 0;
     uint64_t transaction_size_ = 0;
     ClusterHead head_;
@@ -135,7 +133,6 @@ public:
     void open_cluster(const std::vector<DeviceOpenBlueprint> &blueprints);
 
     void write_next_block(const char *data);
-    void write_index_block(uint64_t id, const char *data);
     void write_transaction_block(const char *data);
 
     RingBufferState get_ring_buffer_state() const;
@@ -145,6 +142,5 @@ public:
     void update_state(ClusterState state);
 
     std::unique_ptr<char[]> read_block(uint64_t id, DataValidator validator);
-    std::unique_ptr<char[]> read_index_block(uint64_t id, DataValidator validator);
     std::unique_ptr<char[]> read_transaction_block(DataValidator validator);
 };

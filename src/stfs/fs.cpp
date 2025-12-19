@@ -1,8 +1,14 @@
 #include <stfs/fs.h>
+#include <stfs/search_engine.h>
+#include <iostream>
 
-Fs::Fs(StorageCluster &cluster_ref, Index &index_ref, Journal &journal_ref) : cluster_(cluster_ref), index_(index_ref), journal_(journal_ref)
+Fs::Fs(StorageCluster &cluster_ref, Journal &journal_ref) : cluster_(cluster_ref), journal_(journal_ref)
 {
-    //journal_.recover_transaction();
+    try {
+        journal_.recover_transaction();
+    } catch (...) {
+        std::cerr << "Recovering transaction failed, skiping" << std::endl; 
+    }
 }
 
 void Fs::create_block(uint64_t timestamp, const char *payload)
@@ -48,6 +54,9 @@ Block Fs::get_block_by_id(uint64_t id)
 }
 Block Fs::get_block_by_timestamp(uint64_t timestamp)
 {
-    auto block_id = index_.find_entry_id_by_timestamp(timestamp);
+    TimeStampFetcher fetcher = [this](uint64_t id) -> uint64_t {
+        return read_block(id).timestamp;
+    };
+    auto block_id = SearchEngine::find_block_id_by_timestamp(timestamp, fetcher, cluster_.get_ring_buffer_state());
     return read_block(block_id);
 }

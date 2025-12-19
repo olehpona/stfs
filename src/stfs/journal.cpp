@@ -43,7 +43,7 @@ void Transaction::update_crc() {
     block.update_crc();
     state.update_crc();
 };
-Journal::Journal(StorageCluster& cluster, Index& index): cluster_(cluster), index_(index) {}
+Journal::Journal(StorageCluster& cluster): cluster_(cluster) {}
 
 void Journal::create_transaction(Block block) {
     Transaction transaction = {
@@ -63,10 +63,6 @@ void Journal::commit_transaction() {
     auto serialized_block = entry_->block.serialize();
     cluster_.write_next_block(serialized_block.data());
     uint64_t last_block_id = cluster_.get_ring_buffer_state().tail_id;
-    IndexEntry entry = {
-        .timestamp = entry_->block.timestamp
-    };
-    index_.modify_entry(last_block_id, entry);
 
     size_t struct_size = entry_->serialize().size();
 
