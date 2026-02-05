@@ -1,4 +1,3 @@
-![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![C++](https://img.shields.io/badge/C++-20-blue)
 # STFS - Stream FS

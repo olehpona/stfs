@@ -83,5 +83,6 @@ void Journal::recover_transaction() {
     Transaction transaction;
     transaction.deserialize(data.get());
     entry_ = transaction;
+    
     commit_transaction();
 }

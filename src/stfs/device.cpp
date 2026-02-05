@@ -89,6 +89,7 @@ std::unique_ptr<char[]> FileDevice::read(size_t position, size_t size)
     }
     
     if (file_.gcount() != size) {
+        file_.clear();
         throw DeviceError("Unexpected end of file reached.");
     }
     return data;
@@ -101,6 +102,7 @@ void FileDevice::write(size_t position, const char *data, size_t size)
     file_.flush();
 
     if (file_.fail() || file_.bad()) {
+        file_.clear();
         throw DeviceError("An error occurred while writing from device.");
     }
 }
